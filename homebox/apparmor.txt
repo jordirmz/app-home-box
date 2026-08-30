@@ -1,0 +1,32 @@
+#include <tunables/global>
+
+profile homebox flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Allow basic file access
+  file,
+
+  # Allow signals
+  signal (send, receive),
+
+  # S6 Overlay
+  /init ix,
+  /bin/** ix,
+  /usr/bin/** ix,
+  /run/** rwk,
+  /package/** ix,
+  /command/** ix,
+  /etc/services.d/** rwix,
+  /etc/cont-init.d/** rwix,
+  /etc/cont-finish.d/** rwix,
+
+  # Bashio
+  /usr/lib/bashio/** ix,
+
+  # Temp and data
+  /tmp/** rwk,
+  /data/** rw,
+
+  # Devices
+  /dev/tty rw,
+}

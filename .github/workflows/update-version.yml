@@ -1,0 +1,93 @@
+name: Update stable version
+run-name: Update latest stable Homebox image
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  updateStableVersion:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Authenticate git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+
+      - name: Fetch latest stable Homebox release
+        id: image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/sysadminsmedia/homebox/releases/latest" \
+            | jq -r '.tag_name')
+
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "No valid release tag found"
+            exit 1
+          fi
+
+          # GitHub release: v0.26.2
+          # Docker image:   0.26.2
+          VERSION="${TAG#v}"
+
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid stable version: $VERSION"
+            exit 1
+          fi
+
+          echo "Latest Homebox release: $TAG"
+          echo "Docker image version: $VERSION"
+
+          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Docker image exists
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          IMAGE="ghcr.io/sysadminsmedia/homebox:${TAG}"
+
+          echo "Checking ${IMAGE}..."
+
+          if ! docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "Docker image does not exist: ${IMAGE}"
+            exit 1
+          fi
+
+          echo "Docker image verified: ${IMAGE}"
+
+      - name: Update addon config
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          sed -i "s|^version: .*|version: ${TAG}|" homebox/config.yaml
+
+          echo "Updated Homebox addon to version ${TAG}"
+
+      - name: Commit and push changes
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          if git diff --quiet; then
+            echo "Already using Homebox ${TAG}. No changes to commit."
+            exit 0
+          fi
+
+          git add homebox/config.yaml
+          git commit -m "Update Homebox image to ${TAG}"
+          git push
