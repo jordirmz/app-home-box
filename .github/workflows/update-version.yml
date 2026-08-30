@@ -1,0 +1,73 @@
+name: Update stable version
+run-name: Update latest stable Homebox image
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  updateStableVersion:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+          
+      - name: Authenticate git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+
+      - name: Fetch latest stable Docker image (GitHub Packages API)
+        id: image
+        run: |
+          PAGES=50 # 5000 latest versions
+
+          TAG=$(for PAGE in $(seq 1 $PAGES); do
+            curl -s \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/orgs/sysadminsmedia/packages/container/homebox/versions?per_page=100&page=$PAGE"
+          done \
+          | jq -s -r '
+              add
+              | [
+                  .[]
+                  | (.metadata.container.tags? // [])
+                  | .[]
+                  | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+                ]
+              | sort
+              | last
+            ')
+
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "No valid docker tag found"
+            exit 1
+          fi
+
+          echo "Using image tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Update addon config
+        run: |
+          TAG="${{ steps.image.outputs.tag }}"
+          sed -i "s|^version: .*|version: ${TAG}|" homebox/config.yaml
+  
+      - name: Commit and push changes (if any)
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git add homebox/config.yaml
+          TAG="${{ steps.image.outputs.tag }}"
+          git commit -m "Update Homebox image to ${TAG}"
+          git push
