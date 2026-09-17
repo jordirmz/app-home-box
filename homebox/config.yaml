@@ -13,6 +13,6 @@ webui: "[PROTO:option_name]://[HOST]:[PORT:7745]"
 boot: auto
 ports:
   7745/tcp: 7745
-version: init
+version: 0.26.2
 host_network: false
 apparmor: true
